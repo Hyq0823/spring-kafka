@@ -24,13 +24,16 @@ import org.apache.kafka.clients.producer.Producer;
  * @param <K> the key type.
  * @param <V> the value type.
  *
- * @author Gary Russell
+ * @author Gary
+ *
+ * 生产者-工厂接口
  */
 public interface ProducerFactory<K, V> {
 
 	/**
 	 * Create a producer.
 	 * @return the producer.
+	 * 创建一个生产者
 	 */
 	Producer<K, V> createProducer();
 

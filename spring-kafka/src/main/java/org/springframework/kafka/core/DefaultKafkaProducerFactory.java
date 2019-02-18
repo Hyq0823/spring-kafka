@@ -89,24 +89,39 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 
 	private static final Log logger = LogFactory.getLog(DefaultKafkaProducerFactory.class); // NOSONAR
 
+	/**
+	 * 生产者属性配置
+	 */
 	private final Map<String, Object> configs;
 
+	/**
+	 * 线程安全--记录事务后缀
+	 */
 	private final AtomicInteger transactionIdSuffix = new AtomicInteger();
 
+	/**
+	 * 缓存创建的生产者们
+	 */
 	private final BlockingQueue<CloseSafeProducer<K, V>> cache = new LinkedBlockingQueue<>();
 
+	/**
+	 * 后缀 和 生产者 关系map
+	 */
 	private final Map<String, CloseSafeProducer<K, V>> consumerProducers = new HashMap<>();
 
 	private volatile CloseSafeProducer<K, V> producer;
 
 	private Serializer<K> keySerializer;
-
 	private Serializer<V> valueSerializer;
 
 	private int physicalCloseTimeout = DEFAULT_PHYSICAL_CLOSE_TIMEOUT;
 
+	/**
+	 * 事务前缀
+	 */
 	private String transactionIdPrefix;
 
+	//加载时 用于保存spring的上下文
 	private ApplicationContext applicationContext;
 
 	private boolean producerPerConsumerPartition = true;
@@ -114,6 +129,7 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 	/**
 	 * Construct a factory with the provided configuration.
 	 * @param configs the configuration.
+	 *                构造方法
 	 */
 	public DefaultKafkaProducerFactory(Map<String, Object> configs) {
 		this(configs, null, null);
@@ -124,6 +140,8 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 	 * @param configs the configuration.
 	 * @param keySerializer the key {@link Serializer}.
 	 * @param valueSerializer the value {@link Serializer}.
+	 *
+	 *                        同时指定，key.value序列化方式
 	 */
 	public DefaultKafkaProducerFactory(Map<String, Object> configs,
 			@Nullable Serializer<K> keySerializer,
@@ -169,9 +187,12 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 
 	/**
 	 * When set to 'true', the producer will ensure that exactly one copy of each message is written in the stream.
+	 * 设置为true,生产者将确保在流中准确地写入每个消息的一个副本
 	 */
 	private void enableIdempotentBehaviour() {
+		//如果不包含这个配置，就写入
 		Object previousValue = this.configs.putIfAbsent(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+
 		if (logger.isDebugEnabled() && Boolean.FALSE.equals(previousValue)) {
 			logger.debug("The '" + ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG +
 					"' is set to false, may result in duplicate messages");
@@ -204,6 +225,7 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 	 * Useful for cloning to make a similar factory.
 	 * @return the configs.
 	 * @since 1.3
+	 * 返回不可变的配置集合
 	 */
 	public Map<String, Object> getConfigurationProperties() {
 		return Collections.unmodifiableMap(this.configs);
@@ -289,8 +311,14 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 		return true;
 	}
 
+	/**
+	 * 创建生产者
+	 * @return
+	 */
 	@Override
 	public Producer<K, V> createProducer() {
+
+		//事务相关--是否配置了事务
 		if (this.transactionIdPrefix != null) {
 			if (this.producerPerConsumerPartition) {
 				return createTransactionalProducerForPartition();
@@ -299,6 +327,8 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 				return createTransactionalProducer();
 			}
 		}
+
+		//双锁判断是否先前已经创建出生产者了
 		if (this.producer == null) {
 			synchronized (this) {
 				if (this.producer == null) {
@@ -318,7 +348,12 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 		return new KafkaProducer<K, V>(this.configs, this.keySerializer, this.valueSerializer);
 	}
 
+	/**
+	 * 创建带事务的生产者
+	 * @return
+	 */
 	Producer<K, V> createTransactionalProducerForPartition() {
+		//支持多线程，TransactionSupport提供事务的后缀配置
 		String suffix = TransactionSupport.getTransactionIdSuffix();
 		if (suffix == null) {
 			return createTransactionalProducer();
@@ -365,12 +400,27 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 		}
 	}
 
+	/**
+	 * 创建生产者
+	 * @param suffix 数字后缀
+	 * @param remover
+	 * @return
+	 */
 	private CloseSafeProducer<K, V> doCreateTxProducer(String suffix, Consumer<CloseSafeProducer<K, V>> remover) {
 		Producer<K, V> newProducer;
+		//copy一份配置
 		Map<String, Object> newProducerConfigs = new HashMap<>(this.configs);
+
+		//新配置中加入事务transactional.id配置
+		//如果配置了TransactionalId，则必须启用幂等  enable.idempotence
 		newProducerConfigs.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, this.transactionIdPrefix + suffix);
+
+		//创建生产者对象
 		newProducer = new KafkaProducer<K, V>(newProducerConfigs, this.keySerializer, this.valueSerializer);
+
+		//代理初始化事务
 		newProducer.initTransactions();
+
 		return new CloseSafeProducer<K, V>(newProducer, this.cache, remover,
 				(String) newProducerConfigs.get(ProducerConfig.TRANSACTIONAL_ID_CONFIG));
 	}
@@ -397,15 +447,23 @@ public class DefaultKafkaProducerFactory<K, V> implements ProducerFactory<K, V>,
 	 * @param <K> the key type.
 	 * @param <V> the value type.
 	 *
+	 *           代理producer类
 	 */
 	protected static class CloseSafeProducer<K, V> implements Producer<K, V> {
-
+		/**
+		 * 代理的producer类
+		 */
 		private final Producer<K, V> delegate;
+
+
 
 		private final BlockingQueue<CloseSafeProducer<K, V>> cache;
 
 		private final Consumer<CloseSafeProducer<K, V>> removeConsumerProducer;
 
+		/**
+		 * 配置的trasactionId
+		 */
 		private final String txId;
 
 		private volatile boolean txFailed;

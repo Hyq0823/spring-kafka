@@ -63,18 +63,27 @@ public class KafkaTemplate<K, V> implements KafkaOperations<K, V> {
 
 	protected final Log logger = LogFactory.getLog(this.getClass()); //NOSONAR
 
+	/**
+	 * 保存创建template的 工厂
+	 */
 	private final ProducerFactory<K, V> producerFactory;
 
 	private final boolean autoFlush;
 
 	private final boolean transactional;
 
+	/**
+	 * 每个tmplate保存线程安全的producer
+	 */
 	private final ThreadLocal<Producer<K, V>> producers = new ThreadLocal<>();
 
 	private RecordMessageConverter messageConverter = new MessagingMessageConverter();
 
 	private volatile String defaultTopic;
 
+	/**
+	 * 默认的listener，出错打印异常
+	 */
 	private volatile ProducerListener<K, V> producerListener = new LoggingProducerListener<K, V>();
 
 
@@ -369,7 +378,10 @@ public class KafkaTemplate<K, V> implements KafkaOperations<K, V> {
 			this.logger.trace("Sending: " + producerRecord);
 		}
 		final SettableListenableFuture<SendResult<K, V>> future = new SettableListenableFuture<>();
+
 		producer.send(producerRecord, buildCallback(producerRecord, producer, future));
+
+
 		if (this.autoFlush) {
 			flush();
 		}
